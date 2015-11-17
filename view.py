@@ -28,7 +28,6 @@ TODO
 # IMPORT STATEMENTS
 # =============================================================================
 
-import nibabel as nib
 import numpy as np
 import sys
 
@@ -67,9 +66,10 @@ class SliceView(QtGui.QWidget):
     def __init__(self, parent=None, data=None):
 
         super(SliceView, self).__init__(parent)
+        self.parent = parent
+        self.data = data
 
         # make display available
-        self.data = data
         self.figure = Figure(facecolor="black")
         self.__canvas = FigureCanvas(self.figure)
         self.__imshowAccessor = None
@@ -86,19 +86,23 @@ class SliceView(QtGui.QWidget):
         self.axes.axis("Off")
 
         # plot if we can
-        if data is not None:
-            self.setData(data)
+        if self.data is not None:
+            self.setData(self.data)
 
     def setData(self, data):
 
-        if not self.__imshowAccessor:
+        self.data = data
+        if self.__imshowAccessor is None:
             self.__imshowAccessor = self.axes.imshow(data, cmap=cm.gray)
             self.__canvas.draw()
         else:
             self.__imshowAccessor.set_data(data)
             self.__canvas.draw()
-        self.setMinimumSize(max(data.shape[0], 10),
-                            max(data.shape[1], 10))
+        aspectRatio = data.shape[1] / float(data.shape[0])
+        if aspectRatio < 1:
+            self.setMinimumSize(100 * aspectRatio, 100)
+        else:
+            self.setMinimumSize(100, 100 / aspectRatio)
 
 
 class VolumeView(QtGui.QWidget):
@@ -107,7 +111,12 @@ class VolumeView(QtGui.QWidget):
 
         super(VolumeView, self).__init__(parent)
         self.parent = parent
+        self.data = data
         self.axis = axis
+
+        # initialze variables
+        self.numberOfSlices = 1
+        self.currentSlice = 0
 
         # create single view
         self.sliceView = SliceView(self)
@@ -117,9 +126,9 @@ class VolumeView(QtGui.QWidget):
         self.layout.addWidget(self.sliceView)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
-        if data is not None:
+        if self.data is not None:
 
-            self.setData(data)
+            self.setData(self.data)
 
     def wheelEvent(self, event):
 
@@ -164,7 +173,9 @@ class InteractionWidget(QtGui.QWidget):
     def __init__(self, parent=None):
 
         super(InteractionWidget, self).__init__(parent)
+        self.parent = parent
 
+        # initialize variables
         self.buttons = []
         self.interactors = []
 
@@ -274,11 +285,11 @@ class VolumeViewInteraction(QtGui.QWidget):
 
     def __init__(self, parent=None, data=None, axis=0, position="bottom"):
 
-        # check inputs
-        if position not in ["top", "bottom"]:
-            raise ValueError("Position must be either 'top' or 'bottom'")
-
         super(VolumeViewInteraction, self).__init__(parent)
+        self.parent = parent
+        self.data = data
+        self.axis = axis
+        self.position = position
 
         # initialize children
         self.volumeView = VolumeView(self, None, axis)
@@ -286,12 +297,14 @@ class VolumeViewInteraction(QtGui.QWidget):
 
         # layout
         self.layout = QtGui.QVBoxLayout(self)
-        if position == "top":
+        if self.position == "top":
             self.layout.addWidget(self.interactionWidget)
             self.layout.addWidget(self.volumeView)
-        elif position == "bottom":
+        elif self.position == "bottom":
             self.layout.addWidget(self.volumeView)
             self.layout.addWidget(self.interactionWidget)
+        else:
+            raise ValueError("Position must be 'top' or 'bottom'.")
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setSpacing(0)
 
@@ -305,10 +318,12 @@ class VolumeViewInteraction(QtGui.QWidget):
 
     def setData(self, data):
 
+        self.data = data
         self.volumeView.setData(data)
 
     def setAxis(self, axis):
 
+        self.axis = axis
         self.volumeView.setAxis(axis)
 
     def updateSliceLabel(self):
@@ -317,6 +332,84 @@ class VolumeViewInteraction(QtGui.QWidget):
         self.interactionWidget.setRightLabel(
             "{}/{}".format(self.volumeView.currentSlice + 1,
                            self.volumeView.numberOfSlices))
+
+
+class MultiView(QtGui.QWidget):
+
+    def __init__(self, parent=None):
+
+        super(MultiView, self).__init__(parent)
+
+        self.views = []
+        self.layout = QtGui.QGridLayout(self)
+
+    def addView(self, view):
+
+        self.views.append(view)
+        self.updateLayout()
+
+    def removeView(self, view):
+
+        if isinstance(view, int):
+            del self.views[view]
+        else:
+            for i, oldView in enumerate(self.views):
+                if view == oldView:
+                    del self.views[i]
+                    break
+        self.updateLayout()
+
+    def updateLayout(self):
+
+        # find maximum height and width of single views
+        itemHeight = 1
+        itemWidth = 1
+        for view in self.views:
+            dimensions = list(view.data.shape)
+            del dimensions[view.axis]
+            itemHeight = max(itemHeight, dimensions[1])
+            itemWidth = max(itemWidth, dimensions[0])
+
+        itemWidth /= itemHeight
+        itemHeight = 1
+
+        # find best layout
+        targetAspect = self.width() / float(self.height())
+        lowerAspect = targetAspect
+        numberOfColumns = len(self.views)
+        numberOfRows = 1
+        upperAspect = numberOfColumns * itemWidth / float(itemHeight)
+
+        while upperAspect > targetAspect:
+            if numberOfColumns == 1:
+                break
+            numberOfColumns -= 1
+            numberOfRows = int(np.ceil(len(self.views) / numberOfColumns))
+            currentAspect = (numberOfColumns * itemWidth /
+                             float(numberOfRows * itemHeight))
+            if currentAspect > targetAspect:
+                upperAspect = currentAspect
+            else:
+                lowerAspect = currentAspect
+                break
+
+        if (targetAspect / lowerAspect) > (upperAspect / targetAspect):
+            numberOfColumns += 1
+
+        # now have ideal number of rows and columns
+        # clear layout and insert widgets again (could be optimized)
+        for view in enumerate(self.views):
+            try:
+                self.layout.removeWidget(view)
+            except:
+                pass
+        for i, view in enumerate(self.views):
+            self.layout.addWidget(view, i / numberOfColumns,
+                                  i % numberOfColumns)
+
+    def resizeEvent(self, evt=None):
+
+        self.updateLayout()
 
 
 # =============================================================================
@@ -332,7 +425,12 @@ if __name__ == "__main__":
 
     app = QtGui.QApplication(sys.argv)
 
-    main = VolumeViewInteraction(data=np.random.rand(100, 100, 100))
+    main = MultiView()
+    for i in range(10):
+        currentView = VolumeViewInteraction(main,
+                                            np.random.rand(100, 50, 100))
+        currentView.interactionWidget.addButton("OK")
+        main.addView(currentView)
     main.show()
 
     sys.exit(app.exec_())
