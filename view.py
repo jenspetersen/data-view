@@ -249,6 +249,15 @@ class InteractionWidget(QtGui.QWidget):
         self.buttons[-1].setText(buttonText)
         self.buttonLayout.addWidget(self.buttons[-1])
 
+        # want to adjust button to text width
+        label = QtGui.QLabel()
+        label.setText(buttonText)
+        width = label.fontMetrics().boundingRect(label.text()).width()
+        self.buttons[-1].setFixedWidth(width + 10)
+        palette = self.buttons[-1].palette()
+        palette.setColor(QtGui.QPalette.Button, QtGui.QColor(255, 0, 0, 127))
+        self.buttons[-1].setPalette(palette)
+
     def removeButton(self, buttonID):
 
         self.buttonLayout.removeWidget(self.buttons[buttonID])
@@ -427,8 +436,9 @@ if __name__ == "__main__":
 
     main = MultiView()
     for i in range(10):
+        dims = np.random.randint(50, 100, 3)
         currentView = VolumeViewInteraction(main,
-                                            np.random.rand(100, 50, 100))
+                                            np.random.rand(*dims))
         currentView.interactionWidget.addButton("OK")
         main.addView(currentView)
     main.show()
