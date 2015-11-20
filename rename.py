@@ -29,6 +29,7 @@ TODO
 # =============================================================================
 
 import dicom
+from misc.lazy import LazyProperty
 import numpy as np
 import os
 import re
@@ -86,33 +87,98 @@ def dataFromDICOMDir(directory):
     return dataVolume
 
 
+class LazyDCMVolume(object):
+
+    def __init__(self, dataDirectory=None):
+
+        if dataDirectory is not None:
+            self.setDataDirectory(dataDirectory)
+
+    def setDataDirectory(self, dataDirectory):
+
+        self.dataDirectory = os.path.abspath(dataDirectory)
+        self.fileList = map(lambda x: os.path.join(dataDirectory, x),
+                            os.listdir(dataDirectory))
+        self.__data = {}
+#        self.__data = np.zeros(self.shape)
+#        self.__track = []
+
+    @LazyProperty
+    def shape(self):
+
+        centerSlice = int(len(self.fileList) / 2)
+#        self.__data[centerSlice, :, :] = dicom.read_file(
+#            self.fileList[centerSlice]).pixel_array
+        self.__data[centerSlice] = dicom.read_file(
+            self.fileList[centerSlice]).pixel_array
+#        self.__track.append(centerSlice)
+        sliceDimensions = self.__data[centerSlice].shape
+        return tuple([len(self.fileList)] + list(sliceDimensions))
+
+    def __len__(self):
+
+        return self.shape[0]
+
+    def __getitem__(self, key):
+
+        if key not in self.__data:
+            self.__data[key] = dicom.read_file(self.fileList[key]).pixel_array
+        return self.__data[key]
+
+#        if isinstance(key, int):
+#
+#            if key not in self.__track:
+#                self.__data[key, :, :] = dicom.read_file(
+#                    self.fileList[key]).pixel_array
+#                self.__track.append(key)
+#            return self.__data[key, :, :]
+#
+#        elif isinstance(key, slice):
+#
+#            for index in range(key.indices(len(self))):
+#
+#                if index not in self.__track:
+#                    self.__data[index, :, :] = dicom.read_file(
+#                        self.fileList[index]).pixel_array
+#                    self.__track.append(index)
+#
+#            return self.__data[slice]
+#
+#        elif isinstance(key, tuple):
+#
+#            pass
+
+
+
+
+
 class RenameGUI(QtGui.QWidget):
 
-    def __init__(self, workingDirectory=None, parent=None):
+    def __init__(self, parent=None, workingDirectory=None):
 
         super(RenameGUI, self).__init__(parent)
-        self.workingDirectory = os.path.abspath(workingDirectory)
         self.parent = parent
+        self.workingDirectory = workingDirectory
 
         self.multiView = view.MultiView(self)
         self.paths = {}
 
         if self.workingDirectory is not None:
 
+            self.workingDirectory = os.path.abspath(self.workingDirectory)
+
             # working directory needs to contain DICOM folders
             for dataset in os.listdir(self.workingDirectory):
 
                 datasetPath = os.path.join(self.workingDirectory, dataset)
-                viewInteractor = view.VolumeViewInteraction()
+                viewInteractor = view.VolumeViewInteraction(
+                    data=dataFromDICOMDir(datasetPath))
                 self.paths[viewInteractor] = datasetPath
                 self.multiView.addView(viewInteractor)
 
-                # create the dataset
-
-
     def setWorkingDirectory(self, workingDirectory):
 
-        self.__init__(workingDirectory, self.parent)
+        self.__init__(self.parent, workingDirectory)
 
 
 # =============================================================================
@@ -130,13 +196,15 @@ def main():
     app = QtGui.QApplication(sys.argv)
 
     # input path
-    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130111/0301_NOCONTRAST_FFE"
-    interactor = view.VolumeViewInteraction(data=dataFromDICOMDir(inputFolder))
-    interactor.show()
+    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130111/0301_NOCONTRAST_FFE/"
+    data = LazyDCMVolume(inputFolder)
+    multiView = view.VolumeView(data=data)
+    multiView.show()
+#    multiView = RenameGUI()
+#    multiView.setWorkingDirectory(inputFolder)
 
     sys.exit(app.exec_())
 
-#    mainview = MultiView()
 
 # =============================================================================
 # RUN

@@ -146,7 +146,7 @@ class VolumeView(QtGui.QWidget):
     def setSlice(self, sliceNumber):
 
         if self.axis == 0:
-            self.sliceView.setData(self.data[sliceNumber, :, :])
+            self.sliceView.setData(self.data[sliceNumber])
         elif self.axis == 1:
             self.sliceView.setData(self.data[:, sliceNumber, :])
         elif self.axis == 2:
@@ -348,6 +348,7 @@ class MultiView(QtGui.QWidget):
     def __init__(self, parent=None):
 
         super(MultiView, self).__init__(parent)
+        self.parent = parent
 
         self.views = []
         self.layout = QtGui.QGridLayout(self)
