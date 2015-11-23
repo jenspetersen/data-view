@@ -30,6 +30,7 @@ TODO
 
 import dicom
 from misc.lazy import LazyProperty
+from misc.dcm import valueFromSearch
 import numpy as np
 import os
 import re
@@ -60,33 +61,6 @@ __version__ = '0.1'
 # =============================================================================
 
 
-def findSliceNumber(DCMString):
-
-    pattern = re.compile(
-        "\n\(\w{4}\,\s\w{4}\)\s.*Slice Number.*[A-Z]{2}\:\s\'\s*\d+\s*\'\n")
-    result = re.findall(pattern, DCMString)
-    return int(re.search("\'\s*\d+\s*\'", result[0]).group(0)[1:-1])
-
-
-def dataFromDICOMDir(directory):
-
-    directory = os.path.abspath(directory)
-    slices = {}
-
-    for DCMFile in os.listdir(directory):
-        DCMData = dicom.read_file(os.path.join(directory, DCMFile))
-        sliceNumber = findSliceNumber(str(DCMData))
-        slices[sliceNumber] = DCMData.pixel_array
-
-    dataShape = [len(slices)] + list(slices[1].shape)
-    dataVolume = np.zeros(dataShape)
-
-    for sl in slices:
-        dataVolume[sl - 1, :] = slices[sl]
-
-    return dataVolume
-
-
 class LazyDCMVolume(object):
 
     def __init__(self, dataDirectory=None):
@@ -98,21 +72,14 @@ class LazyDCMVolume(object):
 
         self.dataDirectory = os.path.abspath(dataDirectory)
         self.fileList = map(lambda x: os.path.join(dataDirectory, x),
-                            os.listdir(dataDirectory))
+                            sorted(os.listdir(dataDirectory)))
         self.__data = {}
-#        self.__data = np.zeros(self.shape)
-#        self.__track = []
 
     @LazyProperty
     def shape(self):
 
         centerSlice = int(len(self.fileList) / 2)
-#        self.__data[centerSlice, :, :] = dicom.read_file(
-#            self.fileList[centerSlice]).pixel_array
-        self.__data[centerSlice] = dicom.read_file(
-            self.fileList[centerSlice]).pixel_array
-#        self.__track.append(centerSlice)
-        sliceDimensions = self.__data[centerSlice].shape
+        sliceDimensions = self[centerSlice].shape
         return tuple([len(self.fileList)] + list(sliceDimensions))
 
     def __len__(self):
@@ -124,32 +91,6 @@ class LazyDCMVolume(object):
         if key not in self.__data:
             self.__data[key] = dicom.read_file(self.fileList[key]).pixel_array
         return self.__data[key]
-
-#        if isinstance(key, int):
-#
-#            if key not in self.__track:
-#                self.__data[key, :, :] = dicom.read_file(
-#                    self.fileList[key]).pixel_array
-#                self.__track.append(key)
-#            return self.__data[key, :, :]
-#
-#        elif isinstance(key, slice):
-#
-#            for index in range(key.indices(len(self))):
-#
-#                if index not in self.__track:
-#                    self.__data[index, :, :] = dicom.read_file(
-#                        self.fileList[index]).pixel_array
-#                    self.__track.append(index)
-#
-#            return self.__data[slice]
-#
-#        elif isinstance(key, tuple):
-#
-#            pass
-
-
-
 
 
 class RenameGUI(QtGui.QWidget):
@@ -163,22 +104,25 @@ class RenameGUI(QtGui.QWidget):
         self.multiView = view.MultiView(self)
         self.paths = {}
 
+        self.layout = QtGui.QVBoxLayout(self)
+        self.layout.addWidget(self.multiView)
+
         if self.workingDirectory is not None:
 
-            self.workingDirectory = os.path.abspath(self.workingDirectory)
-
-            # working directory needs to contain DICOM folders
-            for dataset in os.listdir(self.workingDirectory):
-
-                datasetPath = os.path.join(self.workingDirectory, dataset)
-                viewInteractor = view.VolumeViewInteraction(
-                    data=dataFromDICOMDir(datasetPath))
-                self.paths[viewInteractor] = datasetPath
-                self.multiView.addView(viewInteractor)
+            self.setWorkingDirectory(self.workingDirectory)
 
     def setWorkingDirectory(self, workingDirectory):
 
-        self.__init__(self.parent, workingDirectory)
+        self.workingDirectory = os.path.abspath(workingDirectory)
+
+        # working directory needs to contain DICOM folders
+        for dataset in os.listdir(self.workingDirectory):
+
+            datasetPath = os.path.join(self.workingDirectory, dataset)
+            viewInteractor = view.VolumeViewInteraction(
+                data=LazyDCMVolume(datasetPath))
+            self.paths[viewInteractor] = datasetPath
+            self.multiView.addView(viewInteractor)
 
 
 # =============================================================================
@@ -196,12 +140,10 @@ def main():
     app = QtGui.QApplication(sys.argv)
 
     # input path
-    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130111/0301_NOCONTRAST_FFE/"
-    data = LazyDCMVolume(inputFolder)
-    multiView = view.VolumeView(data=data)
+    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130111/"
+    multiView = RenameGUI()
+    multiView.setWorkingDirectory(inputFolder)
     multiView.show()
-#    multiView = RenameGUI()
-#    multiView.setWorkingDirectory(inputFolder)
 
     sys.exit(app.exec_())
 
