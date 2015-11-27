@@ -28,12 +28,8 @@ TODO
 # IMPORT STATEMENTS
 # =============================================================================
 
-import dicom
-from misc.lazy import LazyProperty
-from misc.dcm import valueFromSearch
-import numpy as np
+from misc import dcm
 import os
-import re
 import sys
 import view
 
@@ -59,38 +55,6 @@ __version__ = '0.1'
 # =============================================================================
 # CLASSES
 # =============================================================================
-
-
-class LazyDCMVolume(object):
-
-    def __init__(self, dataDirectory=None):
-
-        if dataDirectory is not None:
-            self.setDataDirectory(dataDirectory)
-
-    def setDataDirectory(self, dataDirectory):
-
-        self.dataDirectory = os.path.abspath(dataDirectory)
-        self.fileList = map(lambda x: os.path.join(dataDirectory, x),
-                            sorted(os.listdir(dataDirectory)))
-        self.__data = {}
-
-    @LazyProperty
-    def shape(self):
-
-        centerSlice = int(len(self.fileList) / 2)
-        sliceDimensions = self[centerSlice].shape
-        return tuple([len(self.fileList)] + list(sliceDimensions))
-
-    def __len__(self):
-
-        return self.shape[0]
-
-    def __getitem__(self, key):
-
-        if key not in self.__data:
-            self.__data[key] = dicom.read_file(self.fileList[key]).pixel_array
-        return self.__data[key]
 
 
 class RenameGUI(QtGui.QWidget):
@@ -119,8 +83,12 @@ class RenameGUI(QtGui.QWidget):
         for dataset in os.listdir(self.workingDirectory):
 
             datasetPath = os.path.join(self.workingDirectory, dataset)
-            viewInteractor = view.VolumeViewInteraction(
-                data=LazyDCMVolume(datasetPath))
+            if len(os.listdir(datasetPath)) < 200:
+                viewInteractor = view.VolumeViewInteraction(
+                    data=dcm.volumeFromDCMDirectory(datasetPath))
+            else:
+                viewInteractor = view.VolumeViewInteraction(
+                    data=dcm.LazyDCMVolume(datasetPath))
             self.paths[viewInteractor] = datasetPath
             self.multiView.addView(viewInteractor)
 
@@ -140,7 +108,8 @@ def main():
     app = QtGui.QApplication(sys.argv)
 
     # input path
-    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130111/"
+#    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130111/"
+    inputFolder = "H:\\BOVAREC\\131_338\\20140401"
     multiView = RenameGUI()
     multiView.setWorkingDirectory(inputFolder)
     multiView.show()
