@@ -100,9 +100,9 @@ class SliceView(QtGui.QWidget):
             self.__canvas.draw()
         aspectRatio = data.shape[1] / float(data.shape[0])
         if aspectRatio < 1:
-            self.setMinimumSize(100 * aspectRatio, 100)
+            self.setMinimumSize(50 * aspectRatio, 50)
         else:
-            self.setMinimumSize(100, 100 / aspectRatio)
+            self.setMinimumSize(50, 50 / aspectRatio)
 
 
 class VolumeView(QtGui.QWidget):
@@ -142,6 +142,7 @@ class VolumeView(QtGui.QWidget):
         self.numberOfSlices = self.data.shape[self.axis]
         self.currentSlice = int(self.numberOfSlices / 2)
         self.setSlice(self.currentSlice)
+        self.setMinimumSize(self.sliceView.minimumSize())
 
     def setSlice(self, sliceNumber):
 
@@ -250,13 +251,11 @@ class InteractionWidget(QtGui.QWidget):
         self.buttonLayout.addWidget(self.buttons[-1])
 
         # want to adjust button to text width
-        label = QtGui.QLabel()
-        label.setText(buttonText)
-        width = label.fontMetrics().boundingRect(label.text()).width()
-        self.buttons[-1].setFixedWidth(width + 10)
-        palette = self.buttons[-1].palette()
-        palette.setColor(QtGui.QPalette.Button, QtGui.QColor(255, 0, 0, 127))
-        self.buttons[-1].setPalette(palette)
+#        label = QtGui.QLabel()
+#        label.setText(buttonText)
+#        width = label.fontMetrics().boundingRect(label.text()).width()
+#        self.buttons[-1].setFixedWidth(width)
+#        self.buttons[-1].setContentsMargins(5, 5, 5, 5)
 
     def removeButton(self, buttonID):
 
@@ -269,18 +268,27 @@ class InteractionWidget(QtGui.QWidget):
         self.interactors[-1].setText(lineEditText)
         self.interactionInnerLayout.addWidget(self.interactors[-1])
 
-    def addCheckBox(self, checkBoxText):
+    def addCheckBox(self, checkBoxText, textPosition="right", default=False):
 
         self.interactors.append(QtGui.QCheckBox(self.interactionInnerFrame))
         self.interactors[-1].setText(checkBoxText)
+        if textPosition == "right":
+            self.interactors[-1].setLayoutDirection(QtCore.Qt.LeftToRight)
+        elif textPosition == "left":
+            self.interactors[-1].setLayoutDirection(QtCore.Qt.RightToLeft)
+        else:
+            raise ValueError("textPosition must be left or right")
+        self.interactors[-1].setChecked(default)
         self.interactionInnerLayout.addWidget(self.interactors[-1])
 
-    def addComboBox(self, options):
+    def addComboBox(self, options, default=0):
 
         self.interactors.append(QtGui.QComboBox(self.interactionInnerFrame))
         for option in options:
             self.interactors[-1].addItem(option)
-        self.interactors[-1].setCurrentIndex(0)
+        if isinstance(default, str):
+            default = options.index(default)
+        self.interactors[-1].setCurrentIndex(default)
         self.interactionInnerLayout.addWidget(self.interactors[-1])
 
     def removeInteractor(self, interactorID):
@@ -329,6 +337,7 @@ class VolumeViewInteraction(QtGui.QWidget):
 
         self.data = data
         self.volumeView.setData(data)
+#        self.setMinimumWidth(self.volumeView.minimumWidth())
 
     def setAxis(self, axis):
 

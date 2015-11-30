@@ -68,8 +68,13 @@ class RenameGUI(QtGui.QWidget):
         self.multiView = view.MultiView(self)
         self.paths = {}
 
+        self.scrollArea = QtGui.QScrollArea(self)
+        self.scrollArea.setWidget(self.multiView)
+        self.scrollArea.setWidgetResizable(True)
+
         self.layout = QtGui.QVBoxLayout(self)
-        self.layout.addWidget(self.multiView)
+        self.layout.addWidget(self.scrollArea)
+        self.layout.setContentsMargins(0, 0, 0, 0)
 
         if self.workingDirectory is not None:
 
@@ -89,8 +94,60 @@ class RenameGUI(QtGui.QWidget):
             else:
                 viewInteractor = view.VolumeViewInteraction(
                     data=dcm.LazyDCMVolume(datasetPath))
+
+            # contrast combo box
+            viewInteractor.interactionWidget.addComboBox(
+                sorted(dcm.allContrasts))
+
+            # orientation combo box
+            viewInteractor.interactionWidget.addComboBox(
+                sorted(dcm.allOrientations))
+
+            # quality checkbox
+            viewInteractor.interactionWidget.addCheckBox("LQ", "left")
+
+            # review checkbox
+            viewInteractor.interactionWidget.addCheckBox("RVW", "left")
+
+            # derived checkbox
+            checked = False
+            viewInteractor.interactionWidget.addCheckBox("DRV", "left",
+                                                         checked)
+
+            # View header button
+            viewInteractor.interactionWidget.addButton("Header")
+
+            # Save button
+            viewInteractor.interactionWidget.addButton("Save")
+
+            # Derivatives combobox
+            derivativeOptions = []
+            for key in dcm.allDerivatives.keys():
+                derivativeOptions += dcm.allDerivatives[key]
+            viewInteractor.interactionWidget.addComboBox(derivativeOptions)
+            if checked:
+                viewInteractor.interactionWidget.interactors[-1].show()
+            else:
+                viewInteractor.interactionWidget.interactors[-1].hide()
+
             self.paths[viewInteractor] = datasetPath
             self.multiView.addView(viewInteractor)
+
+    def onDerivedCheckBoxChanged():
+
+        pass
+
+    def onHeaderButtonClicked():
+
+        pass
+
+    def onSaveButtonClicked():
+
+        pass
+
+    def onSaveAllButtonClicked():
+
+        pass
 
 
 # =============================================================================
