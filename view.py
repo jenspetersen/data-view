@@ -171,7 +171,7 @@ class VolumeView(QtGui.QWidget):
 
 class InteractionWidget(QtGui.QWidget):
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, rows=1):
 
         super(InteractionWidget, self).__init__(parent)
         self.parent = parent
@@ -206,35 +206,47 @@ class InteractionWidget(QtGui.QWidget):
         self.labelLayout.addItem(labelSpacer)
         self.labelLayout.addWidget(self.rightLabel)
 
-        # interaction outer container
-        self.interactionFrame = QtGui.QFrame(self)
-        self.interactionFrame.setFrameShape(QtGui.QFrame.NoFrame)
-        self.interactionLayout = QtGui.QHBoxLayout(self.interactionFrame)
-        self.interactionLayout.setContentsMargins(0, 0, 0, 0)
-
-        # interaction button container
-        self.buttonFrame = QtGui.QFrame(self.interactionFrame)
-        self.buttonFrame.setFrameShape(QtGui.QFrame.NoFrame)
-        self.buttonLayout = QtGui.QHBoxLayout(self.buttonFrame)
-        self.buttonLayout.setContentsMargins(5, 5, 5, 5)
-
-        # interaction inner container
-        self.interactionInnerFrame = QtGui.QFrame(self.interactionFrame)
-        self.interactionInnerFrame.setFrameShape(QtGui.QFrame.NoFrame)
-        self.interactionInnerLayout = QtGui.QHBoxLayout(
-            self.interactionInnerFrame)
-        self.interactionInnerLayout.setContentsMargins(5, 5, 5, 0)
-
-        self.interactionLayout.addWidget(self.interactionInnerFrame)
-        interactionSpacer = QtGui.QSpacerItem(10, 20,
-                                              QtGui.QSizePolicy.Expanding,
-                                              QtGui.QSizePolicy.Minimum)
-        self.interactionLayout.addItem(interactionSpacer)
-        self.interactionLayout.addWidget(self.buttonFrame)
-
-        # outer layout
         self.layout.addWidget(self.labelFrame)
-        self.layout.addWidget(self.interactionFrame)
+
+        self.interactionFrames = []
+        self.interactionLayouts = []
+        self.buttonFrames = []
+        self.buttonLayouts = []
+        self.interactionInnerFrames = []
+        self.interactionInnerLayouts = []
+
+        for i in range(rows):
+
+            # interaction outer container
+            self.interactionFrames.append(QtGui.QFrame(self))
+            self.interactionFrames[-1].setFrameShape(QtGui.QFrame.NoFrame)
+            self.interactionLayouts.append(
+                QtGui.QHBoxLayout(self.interactionFrames[-1]))
+            self.interactionLayouts[-1].setContentsMargins(0, 0, 0, 0)
+
+            # interaction button container
+            self.buttonFrames.append(QtGui.QFrame(self.interactionFrames[-1]))
+            self.buttonFrames[-1].setFrameShape(QtGui.QFrame.NoFrame)
+            self.buttonLayouts.append(QtGui.QHBoxLayout(self.buttonFrames[-1]))
+            self.buttonLayouts[-1].setContentsMargins(5, 5, 5, 5)
+
+            # interaction inner container
+            self.interactionInnerFrames.append(
+                QtGui.QFrame(self.interactionFrames[-1]))
+            self.interactionInnerFrames[-1].setFrameShape(QtGui.QFrame.NoFrame)
+            self.interactionInnerLayouts.append(
+                QtGui.QHBoxLayout(self.interactionInnerFrames[-1]))
+            self.interactionInnerLayouts[-1].setContentsMargins(5, 5, 5, 0)
+
+            self.interactionLayouts[-1].addWidget(
+                self.interactionInnerFrames[-1])
+            interactionSpacer = QtGui.QSpacerItem(10, 20,
+                                                  QtGui.QSizePolicy.Expanding,
+                                                  QtGui.QSizePolicy.Minimum)
+            self.interactionLayouts[-1].addItem(interactionSpacer)
+            self.interactionLayouts[-1].addWidget(self.buttonFrames[-1])
+
+            self.layout.addWidget(self.interactionFrames[-1])
 
     def setLeftLabel(self, labelText):
 
@@ -244,11 +256,11 @@ class InteractionWidget(QtGui.QWidget):
 
         self.rightLabel.setText(labelText)
 
-    def addButton(self, buttonText):
+    def addButton(self, buttonText, row=0):
 
-        self.buttons.append(QtGui.QPushButton(self.buttonFrame))
+        self.buttons.append(QtGui.QPushButton(self.buttonFrames[row]))
         self.buttons[-1].setText(buttonText)
-        self.buttonLayout.addWidget(self.buttons[-1])
+        self.buttonLayouts[row].addWidget(self.buttons[-1])
 
         # want to adjust button to text width
 #        label = QtGui.QLabel()
@@ -259,18 +271,25 @@ class InteractionWidget(QtGui.QWidget):
 
     def removeButton(self, buttonID):
 
-        self.buttonLayout.removeWidget(self.buttons[buttonID])
+        for layout in self.buttonLayouts:
+            try:
+                layout.removeWidget(self.buttons[buttonID])
+            except:
+                pass
         del self.buttons[buttonID]
 
-    def addLineEdit(self, lineEditText=''):
+    def addLineEdit(self, lineEditText='', row=0):
 
-        self.interactors.append(QtGui.QLineEdit(self.interactionInnerFrame))
+        self.interactors.append(QtGui.QLineEdit(
+            self.interactionInnerFrames[-1]))
         self.interactors[-1].setText(lineEditText)
-        self.interactionInnerLayout.addWidget(self.interactors[-1])
+        self.interactionInnerLayouts[row].addWidget(self.interactors[-1])
 
-    def addCheckBox(self, checkBoxText, textPosition="right", default=False):
+    def addCheckBox(self, checkBoxText, textPosition="right", default=False,
+                    row=0):
 
-        self.interactors.append(QtGui.QCheckBox(self.interactionInnerFrame))
+        self.interactors.append(QtGui.QCheckBox(
+            self.interactionInnerFrames[-1]))
         self.interactors[-1].setText(checkBoxText)
         if textPosition == "right":
             self.interactors[-1].setLayoutDirection(QtCore.Qt.LeftToRight)
@@ -279,28 +298,33 @@ class InteractionWidget(QtGui.QWidget):
         else:
             raise ValueError("textPosition must be left or right")
         self.interactors[-1].setChecked(default)
-        self.interactionInnerLayout.addWidget(self.interactors[-1])
+        self.interactionInnerLayouts[row].addWidget(self.interactors[-1])
 
-    def addComboBox(self, options, default=0):
+    def addComboBox(self, options, default=0, row=0):
 
-        self.interactors.append(QtGui.QComboBox(self.interactionInnerFrame))
+        self.interactors.append(QtGui.QComboBox(
+            self.interactionInnerFrames[-1]))
         for option in options:
             self.interactors[-1].addItem(option)
         if isinstance(default, str):
             default = options.index(default)
         self.interactors[-1].setCurrentIndex(default)
-        self.interactionInnerLayout.addWidget(self.interactors[-1])
+        self.interactionInnerLayouts[row].addWidget(self.interactors[-1])
 
     def removeInteractor(self, interactorID):
 
-        self.interactionInnerLayout.removeWidget(
-            self.interactors[interactorID])
+        for layout in self.interactionInnerLayouts:
+            try:
+                layout.removeWidget(self.interactors[interactorID])
+            except:
+                pass
         del self.interactors[interactorID]
 
 
 class VolumeViewInteraction(QtGui.QWidget):
 
-    def __init__(self, parent=None, data=None, axis=0, position="bottom"):
+    def __init__(self, parent=None, data=None, axis=0, position="bottom",
+                 interactionRows=1):
 
         super(VolumeViewInteraction, self).__init__(parent)
         self.parent = parent
@@ -310,7 +334,7 @@ class VolumeViewInteraction(QtGui.QWidget):
 
         # initialize children
         self.volumeView = VolumeView(self, None, axis)
-        self.interactionWidget = InteractionWidget(self)
+        self.interactionWidget = InteractionWidget(self, interactionRows)
 
         # layout
         self.layout = QtGui.QVBoxLayout(self)
@@ -447,9 +471,10 @@ if __name__ == "__main__":
     main = MultiView()
     for i in range(10):
         dims = np.random.randint(50, 100, 3)
-        currentView = VolumeViewInteraction(main,
-                                            np.random.rand(*dims))
+        currentView = VolumeViewInteraction(main,   np.random.rand(*dims),
+                                            interactionRows=2)
         currentView.interactionWidget.addButton("OK")
+        currentView.interactionWidget.addButton("Test", 1)
         main.addView(currentView)
     main.show()
 
