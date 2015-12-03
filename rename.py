@@ -31,6 +31,7 @@ TODO
 import dicom
 from misc import dcm
 import os
+import sqlite3 as sql
 import sys
 import view
 
@@ -60,31 +61,67 @@ __version__ = '0.1'
 
 class RenameGUI(QtGui.QWidget):
 
-    def __init__(self, parent=None, workingDirectory=None):
+    def __init__(self, parent=None, workingDirectory=None, databasePath=None):
 
         super(RenameGUI, self).__init__(parent)
         self.parent = parent
         self.workingDirectory = workingDirectory
+        self.databasePath = databasePath
 
         self.multiView = view.MultiView(self)
         self.paths = {}
-        self.headers = {}
+        self.database = None
+        self.databaseCursor = None
 
-#        self.scrollArea = QtGui.QScrollArea(self)
-#        self.scrollArea.setWidget(self.multiView)
-#        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea = QtGui.QScrollArea(self)
+        self.scrollArea.setWidget(self.multiView)
+        self.scrollArea.setWidgetResizable(True)
 
         self.layout = QtGui.QVBoxLayout(self)
-        self.layout.addWidget(self.multiView)
+
+        # persistent buttons
+        buttonFrame = QtGui.QFrame(self)
+        buttonLayout = QtGui.QHBoxLayout(buttonFrame)
+
+        saveAllButton = QtGui.QPushButton(self)
+        saveAllButton.setText("Save all")
+        saveAllButton.clicked.connect(self.onSaveAllButtonClicked)
+        buttonLayout.addWidget(saveAllButton)
+
+        directoryButton = QtGui.QPushButton(self)
+        directoryButton.setText("New dataset")
+        directoryButton.clicked.connect(self.onNewDatasetButtonClicked)
+        buttonLayout.addWidget(directoryButton)
+
+        self.layout.addWidget(buttonFrame)
+        self.layout.addWidget(self.scrollArea)
         self.layout.setContentsMargins(0, 0, 0, 0)
 
         if self.workingDirectory is not None:
 
             self.setWorkingDirectory(self.workingDirectory)
 
+        if self.databasePath is not None:
+
+            self.setDatabase(self.databasePath)
+
+    def setDatabase(self, databasePath):
+
+        self.database = sql.connect(databasePath)
+        self.databaseCursor = self.database.cursor()
+
+    def disconnectDatabase(self):
+
+        if self.database is not None:
+            self.database.close()
+            self.database = None
+            self.databaseCursor = None
+
     def setWorkingDirectory(self, workingDirectory):
 
         self.workingDirectory = os.path.abspath(workingDirectory)
+        self.setWindowTitle(self.workingDirectory)
+        self.multiView.removeAllViews()
 
         # working directory needs to contain DICOM folders
         for dataset in os.listdir(self.workingDirectory):
@@ -106,11 +143,15 @@ class RenameGUI(QtGui.QWidget):
             header = str(dicom.read_file(path))
 
             # set label
-            leftLabel = dcm.valueFromSearch("Series Description", header)
-            if len(leftLabel["Series Description"]) == 0:
-                leftLabel = ""
+            searches = ["Series Description", "Sequence Name", "Protocol Name"]
+            leftLabel = dcm.valueFromSearch(searches, header, True)
+            for search in searches:
+                if search in leftLabel.keys():
+                    if leftLabel[search] != '':
+                        leftLabel = leftLabel[search]
+                        break
             else:
-                leftLabel = leftLabel["Series Description"][0]
+                leftLabel = ''
             viewInteractor.interactionWidget.setLeftLabel(leftLabel)
 
             # contrast combo box
@@ -178,64 +219,138 @@ class RenameGUI(QtGui.QWidget):
             self.paths[viewInteractor] = datasetPath
             self.multiView.addView(viewInteractor)
 
-            # connect
-            viewInteractor.interactionWidget
-
     def onDerivedCheckBoxChanged(self):
 
-        for i, interactor in enumerate(self.multiView.views):
-            for j, box in enumerate(interactor.interactionWidget.interactors):
-                if self.sender() == box:
-                    if box.isChecked():
-                        self.multiView.views[i].interactionWidget.\
-                            interactors[-2].show()
-                    else:
-                        self.multiView.views[i].interactionWidget.\
-                            interactors[-2].hide()
+        buddy = self.sender().parent().parent().parent().interactors[-2]
+        if self.sender().isChecked():
+            buddy.show()
+        else:
+            buddy.hide()
 
     def onHeaderButtonClicked(self):
 
-        for i, interactor in enumerate(self.multiView.views):
-            for j, button in enumerate(interactor.interactionWidget.buttons):
-                if self.sender() == button:
-                    print i, j
+        interactor = self.sender().parent().parent().parent()
+        path = self.paths[interactor.parent]
+        currentSlice = interactor.parent.volumeView.currentSlice
+        header = str(dicom.read_file(os.path.join(path, sorted(os.listdir(
+            path))[currentSlice])))
+
+        # display header in dialog
+        modal = QtGui.QDialog(self)
+        modalLayout = QtGui.QVBoxLayout(modal)
+        modalText = QtGui.QTextEdit(modal)
+        modalText.setReadOnly(True)
+        modalText.setLineWrapMode(QtGui.QTextEdit.NoWrap)
+        modalText.textCursor().insertHtml(header.replace('\n', "<br>"))
+        modalLayout.addWidget(modalText)
+        modal.resize(QtCore.QSize(700, 500))
+        modal.show()
+
+    def save(self, viewInteractor):
+
+        path = self.paths[viewInteractor]
+        parentDirectory, name = os.path.split(path)
+        interactors = viewInteractor.interactionWidget.interactors
+        header = str(dicom.read_file(os.path.join(path, sorted(os.listdir(
+                     path))[viewInteractor.volumeView.currentSlice])))
+
+        # get data from inputs
+        contrast = interactors[0].itemText(interactors[0].currentIndex())
+        orientation = interactors[1].itemText(interactors[1].currentIndex())
+        enhanced = interactors[2].isChecked()
+        poorQuality = interactors[3].isChecked()
+        review = interactors[4].isChecked()
+        derived = interactors[5].isChecked()
+        if derived:
+            derivedType = interactors[6].itemText(
+                interactors[6].currentIndex())
+        else:
+            derivedType = ""
+        comment = interactors[7].text()
+
+        # get data from header
+        seriesNumber = dcm.findSeriesNumber(header)
+        sequence = dcm.findSequence(header)
+        print sequence
+        vendor = dcm.findVendor(header)
+        fieldStrength = dcm.findFieldStrength(header)
+        echoTime, inversionTime, repetitionTime = dcm.findTimeParameters(
+            header)
+
+        # get data from folder structure
+        directoryStem, date = os.path.split(self.workingDirectory)
+        _, identifier = os.path.split(directoryStem)
+        centerID, patientID = map(int, identifier.split('_'))
+
+        # save and rename
+        info = [str(seriesNumber), contrast, orientation]
+        if enhanced:
+            info.insert(2, "CE")
+        if derived:
+            info.append(derivedType)
+        newName = '_'.join(info)
+        if newName == name:
+            if self.database is not None:
+                self.databaseCursor.execute(
+                    'INSERT OR IGNORE INTO Studies VALUES\
+                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (centerID, patientID, date, seriesNumber, contrast,
+                     enhanced, orientation, sequence, derived, derivedType,
+                     vendor, fieldStrength, echoTime, inversionTime,
+                     repetitionTime, poorQuality, review, comment))
+                self.database.commit()
+            return
+        newPath = os.path.join(parentDirectory, newName)
+        if os.path.exists(newPath):
+            review = True
+            if self.database is not None:
+                self.databaseCursor.execute(
+                    'INSERT OR IGNORE INTO Studies VALUES\
+                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (centerID, patientID, date, seriesNumber, contrast,
+                     enhanced, orientation, sequence, derived, derivedType,
+                     vendor, fieldStrength, echoTime, inversionTime,
+                     repetitionTime, poorQuality, review, comment))
+                self.database.commit()
+            return
+        else:
+            os.rename(path, newPath)
+            self.paths[viewInteractor] = newPath
+            if self.database is not None:
+                self.databaseCursor.execute(
+                    'INSERT OR IGNORE INTO Studies VALUES\
+                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (centerID, patientID, date, seriesNumber, contrast,
+                     enhanced, orientation, sequence, derived, derivedType,
+                     vendor, fieldStrength, echoTime, inversionTime,
+                     repetitionTime, poorQuality, review, comment))
+                self.database.commit()
 
     def onSaveButtonClicked(self):
 
-        for i, interactor in enumerate(self.multiView.views):
-            for j, button in enumerate(interactor.interactionWidget.buttons):
-                if self.sender() == button:
-
-                    # get current info
-                    path = self.paths[interactor]
-                    contrast = interactor.interactionWidget.interactors[0].\
-                        itemText(interactor.interactionWidget.interactors[0].
-                                 currentIndex())
-                    orientation = interactor.interactionWidget.interactors[1].\
-                        itemText(interactor.interactionWidget.interactors[1].
-                                 currentIndex())
-                    enhanced = interactor.interactionWidget.interactors[2].\
-                        isChecked()
-                    poorQuality = interactor.interactionWidget.interactors[3].\
-                        isChecked()
-                    review = interactor.interactionWidget.interactors[4].\
-                        isChecked()
-                    derived = interactor.interactionWidget.interactors[5].\
-                        isChecked()
-                    derivedType = interactor.interactionWidget.interactors[6].\
-                        itemText(interactor.interactionWidget.interactors[6].
-                                 currentIndex())
-                    comment = interactor.interactionWidget.interactors[7].\
-                        text()
-
-                    print path
-                    print contrast, orientation, enhanced, poorQuality, review,
-                    print derived, derivedType, comment
+        viewInteractor = self.sender().parent().parent().parent().parent
+        self.save(viewInteractor)
 
     def onSaveAllButtonClicked(self):
 
-        pass
+        for viewInteractor in self.multiView.views:
+            self.save(viewInteractor)
 
+    def onNewDatasetButtonClicked(self):
+
+        result = QtGui.QFileDialog.getExistingDirectory(self)
+        tmp = self.workingDirectory
+
+        if result:
+
+            # check if lowest level folder
+            try:
+                self.setWorkingDirectory(result)
+            except:
+                self.setWorkingDirectory(tmp)
+
+        else:
+            pass
 
 # =============================================================================
 # METHODS
@@ -252,10 +367,12 @@ def main():
     app = QtGui.QApplication(sys.argv)
 
     # input path
-    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130111/"
+    inputFolder = "/home/jenspetersen/Desktop/BOVAREC/131_149/20130211/"
+    database = "/home/jenspetersen/Desktop/BOVAREC.db"
 #    inputFolder = "H:\\BOVAREC\\131_338\\20140401"
     multiView = RenameGUI()
     multiView.setWorkingDirectory(inputFolder)
+    multiView.setDatabase(database)
     multiView.show()
 
     sys.exit(app.exec_())

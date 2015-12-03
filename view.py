@@ -394,13 +394,20 @@ class MultiView(QtGui.QWidget):
     def removeView(self, view):
 
         if isinstance(view, int):
+            self.layout.itemAt(view).widget().setParent(None)
+            self.views[view].deleteLater()
             del self.views[view]
         else:
             for i, oldView in enumerate(self.views):
                 if view == oldView:
-                    del self.views[i]
+                    self.removeView(i)
                     break
         self.updateLayout()
+
+    def removeAllViews(self):
+
+        while len(self.views) > 0:
+            self.removeView(0)
 
     def updateLayout(self):
 
