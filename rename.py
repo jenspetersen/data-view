@@ -84,14 +84,19 @@ class RenameGUI(QtGui.QWidget):
         buttonLayout = QtGui.QHBoxLayout(buttonFrame)
 
         saveAllButton = QtGui.QPushButton(self)
-        saveAllButton.setText("Save all")
+        saveAllButton.setText("Save All")
         saveAllButton.clicked.connect(self.onSaveAllButtonClicked)
         buttonLayout.addWidget(saveAllButton)
 
         directoryButton = QtGui.QPushButton(self)
-        directoryButton.setText("New dataset")
+        directoryButton.setText("New Dataset")
         directoryButton.clicked.connect(self.onNewDatasetButtonClicked)
         buttonLayout.addWidget(directoryButton)
+
+        databaseButton = QtGui.QPushButton(self)
+        databaseButton.setText("Connect Database")
+        databaseButton.clicked.connect(self.onDatabaseButtonClicked)
+        buttonLayout.addWidget(databaseButton)
 
         self.layout.addWidget(buttonFrame)
         self.layout.addWidget(self.scrollArea)
@@ -116,6 +121,16 @@ class RenameGUI(QtGui.QWidget):
             self.database.close()
             self.database = None
             self.databaseCursor = None
+
+    def onDatabaseButtonClicked(self):
+
+        result = QtGui.QFileDialog.getOpenFileName(self)
+
+        if result.endswith(".db"):
+            self.disconnectDatabase()
+            self.setDatabase(result)
+        else:
+            pass
 
     def setWorkingDirectory(self, workingDirectory):
 
@@ -205,6 +220,9 @@ class RenameGUI(QtGui.QWidget):
             if contrast in isDerived[1].keys():
                 if len(isDerived[1][contrast]) == 1:
                     default = isDerived[1][contrast][0]
+            elif "other" in isDerived[1].keys():
+                if len(isDerived[1]["other"]) == 1:
+                    default = isDerived[1]["other"][0]
             viewInteractor.interactionWidget.addComboBox(derivativeOptions,
                                                          default, 1)
             if isDerived[0]:
@@ -270,8 +288,7 @@ class RenameGUI(QtGui.QWidget):
 
         # get data from header
         seriesNumber = dcm.findSeriesNumber(header)
-        sequence = dcm.findSequence(header)
-        print sequence
+        sequence = ' '.join(dcm.findSequence(header))
         vendor = dcm.findVendor(header)
         fieldStrength = dcm.findFieldStrength(header)
         echoTime, inversionTime, repetitionTime = dcm.findTimeParameters(
@@ -284,6 +301,9 @@ class RenameGUI(QtGui.QWidget):
 
         # save and rename
         info = [str(seriesNumber), contrast, orientation]
+        uniqueIdentifier = '_'.join(map(str, [centerID, patientID, date,
+                                              seriesNumber]))
+
         if enhanced:
             info.insert(2, "CE")
         if derived:
@@ -292,12 +312,13 @@ class RenameGUI(QtGui.QWidget):
         if newName == name:
             if self.database is not None:
                 self.databaseCursor.execute(
-                    'INSERT OR IGNORE INTO Studies VALUES\
-                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    'INSERT OR REPLACE INTO Studies VALUES\
+                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (centerID, patientID, date, seriesNumber, contrast,
                      enhanced, orientation, sequence, derived, derivedType,
                      vendor, fieldStrength, echoTime, inversionTime,
-                     repetitionTime, poorQuality, review, comment))
+                     repetitionTime, poorQuality, review, comment,
+                     uniqueIdentifier))
                 self.database.commit()
             return
         newPath = os.path.join(parentDirectory, newName)
@@ -305,12 +326,13 @@ class RenameGUI(QtGui.QWidget):
             review = True
             if self.database is not None:
                 self.databaseCursor.execute(
-                    'INSERT OR IGNORE INTO Studies VALUES\
-                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    'INSERT OR REPLACE INTO Studies VALUES\
+                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (centerID, patientID, date, seriesNumber, contrast,
                      enhanced, orientation, sequence, derived, derivedType,
                      vendor, fieldStrength, echoTime, inversionTime,
-                     repetitionTime, poorQuality, review, comment))
+                     repetitionTime, poorQuality, review, comment,
+                     uniqueIdentifier))
                 self.database.commit()
             return
         else:
@@ -318,12 +340,13 @@ class RenameGUI(QtGui.QWidget):
             self.paths[viewInteractor] = newPath
             if self.database is not None:
                 self.databaseCursor.execute(
-                    'INSERT OR IGNORE INTO Studies VALUES\
-                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    'INSERT INTO Studies VALUES\
+                    (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (centerID, patientID, date, seriesNumber, contrast,
                      enhanced, orientation, sequence, derived, derivedType,
                      vendor, fieldStrength, echoTime, inversionTime,
-                     repetitionTime, poorQuality, review, comment))
+                     repetitionTime, poorQuality, review, comment,
+                     uniqueIdentifier))
                 self.database.commit()
 
     def onSaveButtonClicked(self):
@@ -371,8 +394,8 @@ def main():
     database = "/home/jenspetersen/Desktop/BOVAREC.db"
 #    inputFolder = "H:\\BOVAREC\\131_338\\20140401"
     multiView = RenameGUI()
-    multiView.setWorkingDirectory(inputFolder)
-    multiView.setDatabase(database)
+#    multiView.setWorkingDirectory(inputFolder)
+#    multiView.setDatabase(database)
     multiView.show()
 
     sys.exit(app.exec_())
