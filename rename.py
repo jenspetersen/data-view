@@ -312,7 +312,7 @@ class RenameGUI(QtGui.QWidget):
         if newName == name:
             if self.database is not None:
                 self.databaseCursor.execute(
-                    'INSERT OR REPLACE INTO Studies VALUES\
+                    'INSERT OR REPLACE INTO Series VALUES\
                     (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (centerID, patientID, date, seriesNumber, contrast,
                      enhanced, orientation, sequence, derived, derivedType,
@@ -326,7 +326,7 @@ class RenameGUI(QtGui.QWidget):
             review = True
             if self.database is not None:
                 self.databaseCursor.execute(
-                    'INSERT OR REPLACE INTO Studies VALUES\
+                    'INSERT OR REPLACE INTO Series VALUES\
                     (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (centerID, patientID, date, seriesNumber, contrast,
                      enhanced, orientation, sequence, derived, derivedType,
@@ -340,7 +340,7 @@ class RenameGUI(QtGui.QWidget):
             self.paths[viewInteractor] = newPath
             if self.database is not None:
                 self.databaseCursor.execute(
-                    'INSERT INTO Studies VALUES\
+                    'INSERT INTO Series VALUES\
                     (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
                     (centerID, patientID, date, seriesNumber, contrast,
                      enhanced, orientation, sequence, derived, derivedType,
