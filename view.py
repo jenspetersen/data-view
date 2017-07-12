@@ -112,7 +112,12 @@ class VolumeView(QtGui.QWidget):
         super(VolumeView, self).__init__(parent)
         self.parent = parent
         self.data = data
-        self.axis = axis
+        if 0 <= axis <= 2:
+            self.axis = axis
+        elif axis == -1:
+            self.axis = 2
+        else:
+            raise IndexError("Index out of range.")
 
         # initialze variables
         self.numberOfSlices = 1
@@ -157,6 +162,9 @@ class VolumeView(QtGui.QWidget):
         self.emit(QtCore.SIGNAL("sliceChanged"))
 
     def setAxis(self, axis):
+
+        if axis == -1:
+            axis = 2
 
         if not isinstance(axis, int):
             raise ValueError("Index must be integer.")
