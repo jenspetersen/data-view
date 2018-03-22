@@ -28,22 +28,36 @@ TODO
 # IMPORT STATEMENTS
 # =============================================================================
 
+from E132Data.nrad import multi
+
 import numpy as np
 import sys
 
-# matplotlib
-from matplotlib.backends import qt_compat
-from matplotlib.backends.backend_qt4agg\
-    import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from matplotlib import cm
 
-# Qt
-use_pyside = qt_compat.QT_API == qt_compat.QT_API_PYSIDE
-if use_pyside:
-    from PySide import QtGui, QtCore
+import qtpy
+from qtpy.QtWidgets import (QWidget,
+                            QVBoxLayout,
+                            QHBoxLayout,
+                            QGridLayout,
+                            QApplication,
+                            QFrame,
+                            QLabel,
+                            QLineEdit,
+                            QComboBox,
+                            QSpacerItem,
+                            QSizePolicy)
+from qtpy.QtCore import Signal, Slot, QSize, Qt
+
+if qtpy.PYQT5:
+    from matplotlib.backends.backend_qt5agg\
+    import FigureCanvasQTAgg as FigureCanvas
+elif qtpy.PYQT4:
+    from matplotlib.backends.backend_qt4agg\
+    import FigureCanvasQTAgg as FigureCanvas
 else:
-    from PyQt4 import QtGui, QtCore
+    raise ModuleNotFoundError("Could not import FigureCanvas. Please use PyQt4 or PyQt5.")
 
 # =============================================================================
 # PROGRAM METADATA
@@ -60,14 +74,19 @@ __version__ = "0.1"
 # METHODS & CLASSES
 # =============================================================================
 
+DEFAULT_FLOAT_CMAP = "gray"
+DEFAULT_INT_CMAP = "magma"
 
-class SliceView(QtGui.QWidget):
 
-    def __init__(self, parent=None, data=None):
 
-        super(SliceView, self).__init__(parent)
+class SliceView(QWidget):
+
+    def __init__(self, data=None, imshow_args=None, parent=None, **kwargs):
+
+        super(SliceView, self).__init__(parent, **kwargs)
         self.parent = parent
         self.data = data
+        self.imshow_args = {} if imshow_args is None else imshow_args
 
         # make display available
         self.figure = Figure(facecolor="black")
@@ -75,10 +94,14 @@ class SliceView(QtGui.QWidget):
         self.__imshowAccessor = None
 
         # layout
-        self.layout = QtGui.QVBoxLayout(self)
+        self.layout = QVBoxLayout(self)
         self.layout.addWidget(self.__canvas)
         self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
         self.setDisabled(True)
+        sizePolicy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        sizePolicy.setHeightForWidth(True)
+        self.setSizePolicy(sizePolicy)
 
         # prepare figure
         self.axes = self.figure.add_subplot(111)
@@ -91,65 +114,103 @@ class SliceView(QtGui.QWidget):
 
     def setData(self, data):
 
+        assert data.ndim == 2, "data for VolumeView must be 2D"
+
         self.data = data
+
+        if "cmap" not in self.imshow_args:
+            if issubclass(data.dtype.type, np.integer):
+                self.imshow_args["cmap"] = DEFAULT_INT_CMAP
+            elif issubclass(data.dtype.type, np.floating):
+                self.imshow_args["cmap"] = DEFAULT_FLOAT_CMAP
+            else:
+                pass
+
         if self.__imshowAccessor is None:
-            self.__imshowAccessor = self.axes.imshow(data, cmap=cm.gray)
-            self.__canvas.draw()
+            self.__imshowAccessor = self.axes.imshow(data, **self.imshow_args)
         else:
             self.__imshowAccessor.set_data(data)
-            self.__canvas.draw()
-        aspectRatio = data.shape[1] / float(data.shape[0])
-        if aspectRatio < 1:
-            self.setMinimumSize(50 * aspectRatio, 50)
-        else:
-            self.setMinimumSize(50, 50 / aspectRatio)
+        self.__canvas.draw()
+
+    def setParams(self, **kwargs):
+
+        self.imshow_args.update(kwargs)
+        self.__imshowAccessor = None
+        if self.data is not None:
+            self.setData(self.data)
+
+    def sizeHint(self):
+        return QSize(self.data.shape[1], self.data.shape[0])
+
+    def aspectHint(self):
+        return self.sizeHint().height / float(self.sizeHint().width)
+
+    def heightForWidth(self, width):
+        return width * self.aspectHint()
 
 
-class VolumeView(QtGui.QWidget):
 
-    def __init__(self, parent=None, data=None, axis=0):
+class VolumeView(QWidget):
 
-        super(VolumeView, self).__init__(parent)
+    signalSliceChanged = Signal()
+
+    def __init__(self, data=None, axis=0, parent=None, **kwargs):
+
+        super(VolumeView, self).__init__(parent, **kwargs)
         self.parent = parent
         self.data = data
+
+        if axis == -1:
+            axis = 2
         if 0 <= axis <= 2:
             self.axis = axis
-        elif axis == -1:
-            self.axis = 2
         else:
             raise IndexError("Index out of range.")
 
-        # initialze variables
+        # initialize variables
         self.numberOfSlices = 1
         self.currentSlice = 0
 
         # create single view
-        self.sliceView = SliceView(self)
+        self.sliceView = SliceView(parent=self)
 
         # layout
-        self.layout = QtGui.QVBoxLayout(self)
+        self.layout = QVBoxLayout(self)
         self.layout.addWidget(self.sliceView)
         self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
+        sizePolicy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        sizePolicy.setHeightForWidth(True)
+        self.setSizePolicy(sizePolicy)
 
         if self.data is not None:
-
             self.setData(self.data)
 
     def wheelEvent(self, event):
 
-        self.currentSlice = (self.currentSlice + int(event.delta() / 120))\
+        try:
+            delta = event.angleDelta().y()
+        except AttributeError:
+            delta = event.delta()
+
+        slice_ = (self.currentSlice + int(delta / 120))\
             % self.numberOfSlices
-        self.setSlice(self.currentSlice)
+        self.setSlice(slice_)
 
     def setData(self, data):
 
+        assert data.ndim == 3, "data for VolumeView must be 3D"
+
         self.data = data
+        self.setParams(vmin=np.min(data), vmax=np.max(data))
+        self.data_min = np.min(data)
+        self.data_max = np.max(data)
         self.numberOfSlices = self.data.shape[self.axis]
-        self.currentSlice = int(self.numberOfSlices / 2)
-        self.setSlice(self.currentSlice)
-        self.setMinimumSize(self.sliceView.minimumSize())
+        self.setSlice(int(self.numberOfSlices / 2))
 
     def setSlice(self, sliceNumber):
+
+        self.currentSlice = sliceNumber
 
         if self.axis == 0:
             self.sliceView.setData(self.data[sliceNumber])
@@ -159,315 +220,184 @@ class VolumeView(QtGui.QWidget):
             self.sliceView.setData(self.data[:, :, sliceNumber])
         else:
             raise IndexError("Index out of range.")
-        self.emit(QtCore.SIGNAL("sliceChanged"))
+
+        self.signalSliceChanged.emit()
 
     def setAxis(self, axis):
 
-        if axis == -1:
-            axis = 2
+        if axis == -1: axis = 2
+        if axis == self.axis: return
 
-        if not isinstance(axis, int):
-            raise ValueError("Index must be integer.")
         if 0 <= axis <= 2:
             self.axis = axis
             self.numberOfSlices = self.data.shape[self.axis]
-            self.currentSlice = int(self.numberOfSlices / 2)
-            self.setSlice(self.currentSlice)
+            self.setSlice(int(self.numberOfSlices / 2))
         else:
             raise IndexError("Index out of range.")
 
+    def setParams(self, **kwargs):
+        self.sliceView.setParams(**kwargs)
 
-class InteractionWidget(QtGui.QWidget):
+    def sizeHint(self):
+        return self.sliceView.sizeHint()
 
-    def __init__(self, parent=None, rows=1):
+    def aspectHint(self):
+        return self.sliceView.aspectHint()
 
-        super(InteractionWidget, self).__init__(parent)
-        self.parent = parent
-
-        # initialize variables
-        self.buttons = []
-        self.interactors = []
-
-        # outer layout
-        self.layout = QtGui.QVBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(0)
-        self.setSizePolicy(QtGui.QSizePolicy.Minimum,
-                           QtGui.QSizePolicy.Fixed)
-
-        # label container
-        self.labelFrame = QtGui.QFrame(self)
-        self.labelFrame.setFrameShape(QtGui.QFrame.NoFrame)
-        self.labelLayout = QtGui.QHBoxLayout(self.labelFrame)
-        self.labelLayout.setContentsMargins(5, 5, 5, 0)
-
-        # labels
-        self.leftLabel = QtGui.QLabel(self.labelFrame)
-        self.rightLabel = QtGui.QLabel(self.labelFrame)
-        self.rightLabel.setAlignment(QtCore.Qt.AlignRight |
-                                     QtCore.Qt.AlignTrailing)
-
-        self.labelLayout.addWidget(self.leftLabel)
-        labelSpacer = QtGui.QSpacerItem(10, 20,
-                                        QtGui.QSizePolicy.Expanding,
-                                        QtGui.QSizePolicy.Minimum)
-        self.labelLayout.addItem(labelSpacer)
-        self.labelLayout.addWidget(self.rightLabel)
-
-        self.layout.addWidget(self.labelFrame)
-
-        self.interactionFrames = []
-        self.interactionLayouts = []
-        self.buttonFrames = []
-        self.buttonLayouts = []
-        self.interactionInnerFrames = []
-        self.interactionInnerLayouts = []
-
-        for i in range(rows):
-
-            # interaction outer container
-            self.interactionFrames.append(QtGui.QFrame(self))
-            self.interactionFrames[-1].setFrameShape(QtGui.QFrame.NoFrame)
-            self.interactionLayouts.append(
-                QtGui.QHBoxLayout(self.interactionFrames[-1]))
-            self.interactionLayouts[-1].setContentsMargins(0, 0, 0, 0)
-
-            # interaction button container
-            self.buttonFrames.append(QtGui.QFrame(self.interactionFrames[-1]))
-            self.buttonFrames[-1].setFrameShape(QtGui.QFrame.NoFrame)
-            self.buttonLayouts.append(QtGui.QHBoxLayout(self.buttonFrames[-1]))
-            self.buttonLayouts[-1].setContentsMargins(5, 5, 5, 5)
-
-            # interaction inner container
-            self.interactionInnerFrames.append(
-                QtGui.QFrame(self.interactionFrames[-1]))
-            self.interactionInnerFrames[-1].setFrameShape(QtGui.QFrame.NoFrame)
-            self.interactionInnerLayouts.append(
-                QtGui.QHBoxLayout(self.interactionInnerFrames[-1]))
-            self.interactionInnerLayouts[-1].setContentsMargins(5, 5, 5, 0)
-
-            self.interactionLayouts[-1].addWidget(
-                self.interactionInnerFrames[-1])
-            interactionSpacer = QtGui.QSpacerItem(10, 20,
-                                                  QtGui.QSizePolicy.Expanding,
-                                                  QtGui.QSizePolicy.Minimum)
-            self.interactionLayouts[-1].addItem(interactionSpacer)
-            self.interactionLayouts[-1].addWidget(self.buttonFrames[-1])
-
-            self.layout.addWidget(self.interactionFrames[-1])
-
-    def setLeftLabel(self, labelText):
-
-        self.leftLabel.setText(labelText)
-
-    def setRightLabel(self, labelText):
-
-        self.rightLabel.setText(labelText)
-
-    def addButton(self, buttonText, row=0):
-
-        self.buttons.append(QtGui.QPushButton(self.buttonFrames[row]))
-        self.buttons[-1].setText(buttonText)
-        self.buttonLayouts[row].addWidget(self.buttons[-1])
-
-        # want to adjust button to text width
-#        label = QtGui.QLabel()
-#        label.setText(buttonText)
-#        width = label.fontMetrics().boundingRect(label.text()).width()
-#        self.buttons[-1].setFixedWidth(width)
-#        self.buttons[-1].setContentsMargins(5, 5, 5, 5)
-
-    def removeButton(self, buttonID):
-
-        for layout in self.buttonLayouts:
-            try:
-                layout.removeWidget(self.buttons[buttonID])
-            except:
-                pass
-        del self.buttons[buttonID]
-
-    def addLineEdit(self, lineEditText='', row=0):
-
-        self.interactors.append(QtGui.QLineEdit(
-            self.interactionInnerFrames[-1]))
-        self.interactors[-1].setText(lineEditText)
-        self.interactionInnerLayouts[row].addWidget(self.interactors[-1])
-
-    def addCheckBox(self, checkBoxText, textPosition="right", default=False,
-                    row=0):
-
-        self.interactors.append(QtGui.QCheckBox(
-            self.interactionInnerFrames[-1]))
-        self.interactors[-1].setText(checkBoxText)
-        if textPosition == "right":
-            self.interactors[-1].setLayoutDirection(QtCore.Qt.LeftToRight)
-        elif textPosition == "left":
-            self.interactors[-1].setLayoutDirection(QtCore.Qt.RightToLeft)
-        else:
-            raise ValueError("textPosition must be left or right")
-        self.interactors[-1].setChecked(default)
-        self.interactionInnerLayouts[row].addWidget(self.interactors[-1])
-
-    def addComboBox(self, options, default=0, row=0):
-
-        self.interactors.append(QtGui.QComboBox(
-            self.interactionInnerFrames[-1]))
-        for option in options:
-            self.interactors[-1].addItem(option)
-        if isinstance(default, str):
-            default = options.index(default)
-        self.interactors[-1].setCurrentIndex(default)
-        self.interactionInnerLayouts[row].addWidget(self.interactors[-1])
-
-    def removeInteractor(self, interactorID):
-
-        for layout in self.interactionInnerLayouts:
-            try:
-                layout.removeWidget(self.interactors[interactorID])
-            except:
-                pass
-        del self.interactors[interactorID]
+    def heightForWidth(self, width):
+        return self.sliceView.heightForWidth(width)
 
 
-class VolumeViewInteraction(QtGui.QWidget):
 
-    def __init__(self, parent=None, data=None, axis=0, position="bottom",
-                 interactionRows=1):
+class InteractionVolumeView(VolumeView):
 
-        super(VolumeViewInteraction, self).__init__(parent)
-        self.parent = parent
-        self.data = data
-        self.axis = axis
-        self.position = position
+    def __init__(self, label=None, **kwargs):
 
-        # initialize children
-        self.volumeView = VolumeView(self, None, axis)
-        self.interactionWidget = InteractionWidget(self, interactionRows)
+        super(InteractionVolumeView, self).__init__(**kwargs)
 
-        # layout
-        self.layout = QtGui.QVBoxLayout(self)
-        if self.position == "top":
-            self.layout.addWidget(self.interactionWidget)
-            self.layout.addWidget(self.volumeView)
-        elif self.position == "bottom":
-            self.layout.addWidget(self.volumeView)
-            self.layout.addWidget(self.interactionWidget)
-        else:
-            raise ValueError("Position must be 'top' or 'bottom'.")
-        self.layout.setContentsMargins(0, 0, 0, 0)
-        self.layout.setSpacing(0)
+        self.interactionFrame = QFrame(self)
+        self.interactionFrame.setSizePolicy(QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed))
+        self.interactionFrame.setFixedHeight(30)
+        self.interactionLayout = QHBoxLayout(self.interactionFrame)
+        self.interactionLayout.setContentsMargins(5, 5, 5, 5)
 
-        # connect signals
-        self.connect(self.volumeView, QtCore.SIGNAL("sliceChanged"),
-                     self.updateSliceLabel)
+        self.sliceLabel = QLabel(self.interactionFrame)
+        self.sliceLabel.setSizePolicy(QSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum))
+        self.updateSliceLabel()
 
-        # set data
-        if data is not None:
-            self.setData(data)
+        self.textLabel = QLineEdit(self.interactionFrame)
+        self.textLabel.setReadOnly(True)
+        self.textLabel.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum))
+        self.textLabel.setAlignment(Qt.AlignCenter)
+        stylesheet = \
+            "QLineEdit {\n" \
+            + "border: none;\n" \
+            + "background-color: rgba(255, 255, 255, 0);\n" \
+            + "}"
+        self.textLabel.setStyleSheet(stylesheet)
+        if label is not None:
+            self.updateTextLabel(label)
 
-    def setData(self, data):
+        self.interactionLayout.addWidget(self.sliceLabel)
+        self.interactionLayout.addWidget(self.textLabel)
 
-        self.data = data
-        self.volumeView.setData(data)
-#        self.setMinimumWidth(self.volumeView.minimumWidth())
+        self.axisSelector = QComboBox(self.interactionFrame)
+        self.axisSelector.setFixedWidth(40)
+        self.axisSelector.insertItems(0, ["0", "1", "2"])
+        self.interactionLayout.addWidget(self.axisSelector)
 
-    def setAxis(self, axis):
+        self.layout.addWidget(self.interactionFrame)
 
-        self.axis = axis
-        self.volumeView.setAxis(axis)
+        self.signalSliceChanged.connect(self.updateSliceLabel)
+        self.axisSelector.currentIndexChanged.connect(self.setAxis)
 
     def updateSliceLabel(self):
+        self.sliceLabel.setText("{}/{}".format(self.currentSlice, self.numberOfSlices))
 
-        # note that we print the slice number starting at 1 rather than 0
-        self.interactionWidget.setRightLabel(
-            "{}/{}".format(self.volumeView.currentSlice + 1,
-                           self.volumeView.numberOfSlices))
+    def updateTextLabel(self, text):
+        self.textLabel.setText(text)
+        self.textLabel.setCursorPosition(0)
 
 
-class MultiView(QtGui.QWidget):
 
-    def __init__(self, parent=None):
+class MultiView(QWidget):
 
-        super(MultiView, self).__init__(parent)
+    def __init__(self, views=None, data=None, labels=None, layout="horizontal", parent=None, **kwargs):
+
+        super(MultiView, self).__init__(parent, **kwargs)
+
         self.parent = parent
-
+        if layout == "horizontal":
+            self.layout = QHBoxLayout(self)
+        elif layout == "vertical":
+            self.layout = QVBoxLayout(self)
+        else:
+            raise ValueError("layout must be 'horizontal' or 'vertical'.")
         self.views = []
-        self.layout = QtGui.QGridLayout(self)
+
+        if views is not None:
+            for view in views:
+                self.addView(view)
+
+        if data is not None:
+            if data.ndim not in (3, 4):
+                raise IndexError("Dimensionality of data must be 3 or 4.")
+            if data.ndim == 3: data = data[np.newaxis, ...]
+            for ax in range(data.shape[0]):
+                current_label = labels[ax] if labels is not None else None
+                self.addView(InteractionVolumeView(data=data[ax], label=current_label))
 
     def addView(self, view):
 
         self.views.append(view)
-        self.updateLayout()
+        self.layout.addWidget(view)
 
     def removeView(self, view):
 
         if isinstance(view, int):
             self.layout.itemAt(view).widget().setParent(None)
             self.views[view].deleteLater()
-            del self.views[view]
         else:
             for i, oldView in enumerate(self.views):
                 if view == oldView:
                     self.removeView(i)
                     break
-        self.updateLayout()
 
-    def removeAllViews(self):
 
-        while len(self.views) > 0:
-            self.removeView(0)
 
-    def updateLayout(self):
+class RowMultiView(MultiView):
+    def __init__(self, *args, **kwargs):
+        kwargs["layout"] = "horizontal"
+        super(RowMultiView, self).__init__(*args, **kwargs)
 
-        # find maximum height and width of single views
-        itemHeight = 1
-        itemWidth = 1
-        for view in self.views:
-            dimensions = list(view.data.shape)
-            del dimensions[view.axis]
-            itemHeight = max(itemHeight, dimensions[1])
-            itemWidth = max(itemWidth, dimensions[0])
 
-        itemWidth /= itemHeight
-        itemHeight = 1
 
-        # find best layout
-        targetAspect = self.width() / float(self.height())
-        lowerAspect = targetAspect
-        numberOfColumns = len(self.views)
-        numberOfRows = 1
-        upperAspect = numberOfColumns * itemWidth / float(itemHeight)
+class ColumnMultiView(MultiView):
+    def __init__(self, *args, **kwargs):
+        kwargs["layout"] = "vertical"
+        super(ColumnMultiView, self).__init__(*args, **kwargs)
 
-        while upperAspect > targetAspect:
-            if numberOfColumns == 1:
-                break
-            numberOfColumns -= 1
-            numberOfRows = int(np.ceil(len(self.views) / numberOfColumns))
-            currentAspect = (numberOfColumns * itemWidth /
-                             float(numberOfRows * itemHeight))
-            if currentAspect > targetAspect:
-                upperAspect = currentAspect
+
+
+def make_gridview(data, labels=None, identify_segmentations=True, column_kwargs=None, row_kwargs=None, volume_kwargs=None):
+
+    if column_kwargs is None: column_kwargs = {}
+    if row_kwargs is None: row_kwargs = {}
+    if volume_kwargs is None: volume_kwargs = {}
+
+    if data.ndim != 5:
+        raise IndexError("Dimensionality of data must be 5.")
+
+    colview = ColumnMultiView(**column_kwargs)
+    seg_values = set()
+
+    for i in range(data.shape[0]):
+        volviews = []
+        for j in range(data.shape[1]):
+            current_data = data[i, j]
+            if identify_segmentations:
+                unique = np.unique(current_data)
+                if len(unique) <= 64:
+                    current_data = current_data.astpye(np.int16)
+                    seg_values += set(unique)
+            if labels is not None:
+                volview = InteractionVolumeView(data=current_data, label=labels[i, j], **volume_kwargs)
             else:
-                lowerAspect = currentAspect
-                break
+                volview = InteractionVolumeView(data=current_data, **volume_kwargs)
+            volviews.append(volview)
+        rowview = RowMultiView(views=volviews, **row_kwargs)
+        colview.addView(rowview)
 
-        if (targetAspect / lowerAspect) > (upperAspect / targetAspect):
-            numberOfColumns += 1
+    if len(seg_values) > 0:
+        vmin = min(seg_values)
+        vmax = max(seg_values)
+        for rowview in colview.views:
+            for view in rowview.views:
+                if np.issubdtype(view.data.dtype, np.integer):
+                    view.setParams(vmin=vmin, vmax=vmax)
 
-        # now have ideal number of rows and columns
-        # clear layout and insert widgets again (could be optimized)
-        for view in enumerate(self.views):
-            try:
-                self.layout.removeWidget(view)
-            except:
-                pass
-        for i, view in enumerate(self.views):
-            self.layout.addWidget(view, i / numberOfColumns,
-                                  i % numberOfColumns)
 
-    def resizeEvent(self, evt=None):
-
-        self.updateLayout()
+    return colview
 
 
 # =============================================================================
@@ -481,16 +411,15 @@ class MultiView(QtGui.QWidget):
 
 if __name__ == "__main__":
 
-    app = QtGui.QApplication(sys.argv)
+    app = QApplication(sys.argv)
 
-    main = MultiView()
-    for i in range(10):
-        dims = np.random.randint(50, 100, 3)
-        currentView = VolumeViewInteraction(main,   np.random.rand(*dims),
-                                            interactionRows=2)
-        currentView.interactionWidget.addButton("OK")
-        currentView.interactionWidget.addButton("Test", 1)
-        main.addView(currentView)
+    subject = multi.all_subjects()[0]
+    data = multi.load(subjects=[subject])[subject]
+
+    # labels = ["T1", "T1ce", "T2", "FLAIR", "T1ce - T1", "Segmentation", "Brain Mask"]
+
+    # main = InteractionVolumeView(data=data[0, 5])
+    main = make_gridview(data=data)
     main.show()
 
     sys.exit(app.exec_())
