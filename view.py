@@ -28,9 +28,10 @@ TODO
 # IMPORT STATEMENTS
 # =============================================================================
 
-from E132Data.nrad import multi
-
+import argparse
+import json
 import numpy as np
+import os
 import sys
 
 from matplotlib.figure import Figure
@@ -378,10 +379,10 @@ def make_gridview(data, labels=None, identify_segmentations=True, column_kwargs=
             if identify_segmentations:
                 unique = np.unique(current_data)
                 if len(unique) <= 64:
-                    current_data = current_data.astpye(np.int16)
-                    seg_values += set(unique)
+                    current_data = current_data.astype(np.int16)
+                    seg_values.update(unique)
             if labels is not None:
-                volview = InteractionVolumeView(data=current_data, label=labels[i, j], **volume_kwargs)
+                volview = InteractionVolumeView(data=current_data, label=labels[i][j], **volume_kwargs)
             else:
                 volview = InteractionVolumeView(data=current_data, **volume_kwargs)
             volviews.append(volview)
@@ -396,9 +397,7 @@ def make_gridview(data, labels=None, identify_segmentations=True, column_kwargs=
                 if np.issubdtype(view.data.dtype, np.integer):
                     view.setParams(vmin=vmin, vmax=vmax)
 
-
     return colview
-
 
 # =============================================================================
 # MAIN METHOD
@@ -411,15 +410,52 @@ def make_gridview(data, labels=None, identify_segmentations=True, column_kwargs=
 
 if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument("objects", type=str, nargs="+",
+                        help="Files or directories to load.")
+    parser.add_argument("-seg", "--identify-segmentations", action="store_true")
+    parser.add_argument("--column-kwargs", default="{}")
+    parser.add_argument("--row-kwargs", default="{}")
+    parser.add_argument("--volume-kwargs", default="{}")
+    args = parser.parse_args()
+
+    column_kwargs = json.loads(args.column_kwargs)
+    row_kwargs = json.loads(args.row_kwargs)
+    volume_kwargs = json.loads(args.volume_kwargs)
+
     app = QApplication(sys.argv)
 
-    subject = multi.all_subjects()[0]
-    data = multi.load(subjects=[subject])[subject]
+    data = []
+    labels = []
 
-    # labels = ["T1", "T1ce", "T2", "FLAIR", "T1ce - T1", "Segmentation", "Brain Mask"]
+    for o, obj in enumerate(args.objects):
 
-    # main = InteractionVolumeView(data=data[0, 5])
-    main = make_gridview(data=data)
+        current_data = np.load(obj)
+        current_label = os.path.basename(obj).split(".")[0]
+
+        if o >= 1 and current_data.ndim != data[-1].ndim:
+            raise IndexError("All loaded datasets must have the same dimensionality.")
+
+        if current_data.ndim not in (3, 4, 5):
+            raise IndexError("Can only load datasets with dimension 3, 4 or 5.")
+
+        if o >= 1 and current_data.ndim >=5:
+            raise IndexError("When loading multiple datasets, the dimensionality of each can't be greater than 4.")
+
+        if current_data.ndim == 4:
+            current_label = [current_label + " " + str(i) for i in range(current_data.shape[0])]
+
+        data.append(current_data)
+        labels.append(current_label)
+
+    data = np.array(data)
+
+    if data.ndim == 4:
+        data = data[np.newaxis, ...]
+        labels = [labels]
+
+    main = make_gridview(data, labels=labels, identify_segmentations=args.identify_segmentations,
+                         column_kwargs=column_kwargs, row_kwargs=row_kwargs, volume_kwargs=volume_kwargs)
     main.show()
 
     sys.exit(app.exec_())
