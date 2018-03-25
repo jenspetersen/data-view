@@ -2,7 +2,7 @@
 Version=0.1
 Name=Data Viewer
 Comment=View numpy array
-Exec=python -m dataview.view --identify-segmentations %U
+Exec=python -m dataview.view %U
 Terminal=false
 Type=Application
 Categories=Utility;Application;

@@ -153,7 +153,8 @@ class SliceView(QWidget):
 
 class VolumeView(QWidget):
 
-    signalSliceChanged = Signal()
+    signalSliceChanged = Signal(int)
+    signalSyncSlices = Signal(int)
 
     def __init__(self, data=None, axis=0, parent=None, **kwargs):
 
@@ -198,6 +199,12 @@ class VolumeView(QWidget):
             % self.numberOfSlices
         self.setSlice(slice_)
 
+        self.signalSliceChanged.emit(slice_)
+
+        modifiers = QApplication.keyboardModifiers()
+        if modifiers == Qt.ControlModifier:
+            self.signalSyncSlices.emit(slice_)
+
     def setData(self, data):
 
         assert data.ndim == 3, "data for VolumeView must be 3D"
@@ -221,8 +228,6 @@ class VolumeView(QWidget):
             self.sliceView.setData(self.data[:, :, sliceNumber])
         else:
             raise IndexError("Index out of range.")
-
-        self.signalSliceChanged.emit()
 
     def setAxis(self, axis):
 
@@ -251,6 +256,8 @@ class VolumeView(QWidget):
 
 
 class InteractionVolumeView(VolumeView):
+
+    signalAxisChanged = Signal(int)
 
     def __init__(self, label=None, **kwargs):
 
@@ -290,18 +297,41 @@ class InteractionVolumeView(VolumeView):
         self.layout.addWidget(self.interactionFrame)
 
         self.signalSliceChanged.connect(self.updateSliceLabel)
-        self.axisSelector.currentIndexChanged.connect(self.setAxis)
+        self.axisSelector.currentIndexChanged.connect(self.setAxisAndEmit)
+
+    def setAxisAndEmit(self, axis):
+        self.setAxis(axis)
+        self.signalAxisChanged.emit(axis)
+
+    def setAxis(self, axis):
+        super(InteractionVolumeView, self).setAxis(axis)
+        self.axisSelector.setCurrentIndex(axis)
+        self.updateSliceLabel()
+
+    def setSlice(self, slice_):
+        super(InteractionVolumeView, self).setSlice(slice_)
+        self.updateSliceLabel()
 
     def updateSliceLabel(self):
-        self.sliceLabel.setText("{}/{}".format(self.currentSlice, self.numberOfSlices))
+        try:
+            length = str(len(str(self.numberOfSlices)))
+            self.sliceLabel.setText(("{:0" + length + "d}/{:0" + length + "}").format(self.currentSlice, self.numberOfSlices))
+        except AttributeError:
+            pass
 
     def updateTextLabel(self, text):
-        self.textLabel.setText(text)
-        self.textLabel.setCursorPosition(0)
+        try:
+            self.textLabel.setText(text)
+            self.textLabel.setCursorPosition(0)
+        except AttributeError:
+            pass
 
 
 
 class MultiView(QWidget):
+
+    signalSyncSlices = Signal(int)
+    signalAxisChanged = Signal(int)
 
     def __init__(self, views=None, data=None, labels=None, layout="horizontal", parent=None, **kwargs):
 
@@ -314,6 +344,7 @@ class MultiView(QWidget):
             self.layout = QVBoxLayout(self)
         else:
             raise ValueError("layout must be 'horizontal' or 'vertical'.")
+
         self.views = []
 
         if views is not None:
@@ -332,6 +363,10 @@ class MultiView(QWidget):
 
         self.views.append(view)
         self.layout.addWidget(view)
+        if hasattr(view, "signalAxisChanged"):
+            view.signalAxisChanged.connect(self.on_signalAxisChanged)
+        if hasattr(view, "signalSyncSlices"):
+            view.signalSyncSlices.connect(self.on_signalSyncSlices)
 
     def removeView(self, view):
 
@@ -343,6 +378,25 @@ class MultiView(QWidget):
                 if view == oldView:
                     self.removeView(i)
                     break
+
+    def setAxis(self, axis):
+        for view in self.views:
+            view.setAxis(axis)
+
+    def setSlice(self, slice_):
+        for view in self.views:
+            view.setSlice(slice_)
+
+    def __getitem__(self, idx):
+        return self.views[idx]
+
+    def on_signalAxisChanged(self, axis):
+        self.setAxis(axis)
+        self.signalAxisChanged.emit(axis)
+
+    def on_signalSyncSlices(self, slice_):
+        self.setSlice(slice_)
+        self.signalSyncSlices.emit(slice_)
 
 
 
@@ -371,16 +425,17 @@ def make_gridview(data, labels=None, identify_segmentations=True, column_kwargs=
 
     colview = ColumnMultiView(**column_kwargs)
     seg_values = set()
+    seg_ids = []
 
     for i in range(data.shape[0]):
         volviews = []
         for j in range(data.shape[1]):
-            current_data = data[i, j]
+            current_data = data[i, j, ...]
             if identify_segmentations:
                 unique = np.unique(current_data)
                 if len(unique) <= 64:
-                    current_data = current_data.astype(np.int16)
                     seg_values.update(unique)
+                    seg_ids.append((i, j))
             if labels is not None:
                 volview = InteractionVolumeView(data=current_data, label=labels[i][j], **volume_kwargs)
             else:
@@ -389,13 +444,11 @@ def make_gridview(data, labels=None, identify_segmentations=True, column_kwargs=
         rowview = RowMultiView(views=volviews, **row_kwargs)
         colview.addView(rowview)
 
-    if len(seg_values) > 0:
+    if len(seg_ids) > 0:
         vmin = min(seg_values)
         vmax = max(seg_values)
-        for rowview in colview.views:
-            for view in rowview.views:
-                if np.issubdtype(view.data.dtype, np.integer):
-                    view.setParams(vmin=vmin, vmax=vmax)
+        for id_ in seg_ids:
+            colview[id_[0]][id_[1]].setParams(vmin=vmin, vmax=vmax, cmap=DEFAULT_INT_CMAP)
 
     return colview
 
@@ -408,7 +461,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("objects", type=str, nargs="+",
                         help="Files or directories to load.")
-    parser.add_argument("-seg", "--identify-segmentations", action="store_true")
+    parser.add_argument("-ns", "--no-segmentations", action="store_true")
+    parser.add_argument("-nm", "--no-memmap", action="store_true")
     parser.add_argument("--column-kwargs", default="{}")
     parser.add_argument("--row-kwargs", default="{}")
     parser.add_argument("--volume-kwargs", default="{}")
@@ -417,6 +471,7 @@ def main():
     column_kwargs = json.loads(args.column_kwargs)
     row_kwargs = json.loads(args.row_kwargs)
     volume_kwargs = json.loads(args.volume_kwargs)
+    mmap = None if args.no_memmap else "r"
 
     app = QApplication(sys.argv)
 
@@ -425,7 +480,7 @@ def main():
 
     for o, obj in enumerate(args.objects):
 
-        current_data = np.load(obj)
+        current_data = np.load(obj, mmap)
         current_label = os.path.basename(obj).split(".")[0]
 
         if o >= 1 and current_data.ndim != data[-1].ndim:
@@ -438,7 +493,16 @@ def main():
             raise IndexError("When loading multiple datasets, the dimensionality of each can't be greater than 4.")
 
         if current_data.ndim == 4:
-            current_label = [current_label + " " + str(i) for i in range(current_data.shape[0])]
+            current_label = [current_label + "-" + str(i) for i in range(current_data.shape[0])]
+
+        if current_data.ndim == 5:
+            col_label = []
+            for i in range(current_data.shape[0]):
+                row_label = []
+                for j in range(current_data.shape[1]):
+                    row_label.append(current_label + "-" + "{},{}".format(i, j))
+                col_label.append(row_label)
+            current_label = col_label
 
         data.append(current_data)
         labels.append(current_label)
@@ -449,8 +513,13 @@ def main():
         data = data[np.newaxis, ...]
         labels = [labels]
 
-    main = make_gridview(data, labels=labels, identify_segmentations=args.identify_segmentations,
+    if data.ndim == 6:
+        data = data[0]
+        labels = labels[0]
+
+    main = make_gridview(data, labels=labels, identify_segmentations=not args.no_segmentations,
                          column_kwargs=column_kwargs, row_kwargs=row_kwargs, volume_kwargs=volume_kwargs)
+
     main.show()
 
     sys.exit(app.exec_())
